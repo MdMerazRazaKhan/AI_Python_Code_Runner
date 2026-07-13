@@ -24,8 +24,30 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
     document.body.removeChild(element);
   };
 
+  const handleEditorBeforeMount = (monaco) => {
+    monaco.editor.defineTheme('creamBrown', {
+      base: 'vs',
+      inherit: true,
+      rules: [
+        { token: 'comment', foreground: '9c8470', fontStyle: 'italic' },
+        { token: 'keyword', foreground: '895129', fontWeight: 'bold' },
+        { token: 'string', foreground: '059669' },
+        { token: 'number', foreground: 'd97706' },
+        { token: 'delimiter', foreground: '3d2b1f' },
+      ],
+      colors: {
+        'editor.background': '#fdfbf7',
+        'editor.lineHighlightBackground': '#f5efe6',
+        'editorLineNumber.foreground': '#9c8470',
+        'editorLineNumber.activeForeground': '#895129',
+        'editor.foreground': '#3d2b1f',
+        'editorCursor.foreground': '#895129',
+      }
+    });
+  };
+
   return (
-    <div className="glass-panel editor-panel animate-fade" style={{ display: 'flex', flexDirection: 'column' }}>
+    <div className="glass-panel editor-panel animate-fade" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <div className="editor-header">
         <div className="editor-title-container">
           <FileCode size={18} className="editor-icon" />
@@ -111,7 +133,8 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
           defaultLanguage="python"
           value={code}
           onChange={onChange}
-          theme={theme === 'dark' ? 'vs-dark' : 'light'}
+          theme={theme === 'dark' ? 'vs-dark' : 'creamBrown'}
+          beforeMount={handleEditorBeforeMount}
           options={{
             minimap: { enabled: false },
             fontSize: 14,

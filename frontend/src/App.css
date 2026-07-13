@@ -313,7 +313,6 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 300px;
   overflow: hidden;
 }
 
@@ -396,24 +395,22 @@
 
 /* Console Panel */
 .console-panel {
-  height: 200px;
-  min-height: 150px;
-  max-height: 350px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #06070a;
+  background: var(--terminal-bg);
   border: 1px solid var(--border-color);
-  box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+  box-shadow: var(--shadow-terminal);
 }
 
 .console-header {
   padding: 8px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: none;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(0,0,0,0.3);
+  background: var(--bg-tertiary);
 }
 
 .console-title-container {
@@ -465,16 +462,7 @@
   position: relative;
 }
 
-.console-body::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-  background-size: 100% 4px, 6px 100%;
-  animation: terminalPulse 8s infinite linear;
-  opacity: 0.4;
-}
+
 
 .console-text-stdout {
   color: #a7f3d0; /* Soft emerald */

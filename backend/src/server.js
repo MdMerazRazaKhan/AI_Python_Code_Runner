@@ -25,14 +25,18 @@ wss.on('connection', (ws) => {
   let stderr = '';
   let startTime = null;
   let tempFilePath = '';
+  let activeFileName = '';
+  let activeLinesCount = 0;
 
   ws.on('message', async (message) => {
     try {
       const payload = JSON.parse(message);
 
       if (payload.type === 'run') {
-        const { code } = payload;
+        const { code, fileName } = payload;
         codeContent = code;
+        activeFileName = fileName || 'untitled.py';
+        activeLinesCount = code ? code.split('\n').length : 0;
         stdout = '';
         stderr = '';
         activeRunId = Date.now().toString() + '-' + Math.random().toString(36).substring(2, 11);
@@ -105,14 +109,16 @@ wss.on('connection', (ws) => {
 
           const historyEntry = {
             id: activeRunId,
-            prompt: 'Interactive Run',
+            prompt: activeFileName,
             code: codeContent,
             timestamp: new Date().toISOString(),
             status: status,
             executionTime: executionTime,
             output: stdout,
             error: stderr,
-            engine: isDockerAvailable ? 'docker' : 'local'
+            engine: isDockerAvailable ? 'docker' : 'local',
+            fileName: activeFileName,
+            linesCount: activeLinesCount
           };
 
           await fileHandler.addHistoryEntry(historyEntry);

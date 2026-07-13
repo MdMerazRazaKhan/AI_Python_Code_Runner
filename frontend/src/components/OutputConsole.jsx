@@ -54,7 +54,7 @@ export default function OutputConsole({
   };
 
   return (
-    <div className="glass-panel console-panel animate-fade" style={{ height: '300px', minHeight: '220px', maxHeight: '420px', display: 'flex', flexDirection: 'column' }}>
+    <div className="glass-panel console-panel animate-fade" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <div className="console-header" style={{ flexShrink: 0 }}>
         <div className="console-title-container">
           <Terminal size={14} className="console-title-icon" />
@@ -204,7 +204,7 @@ export default function OutputConsole({
           </div>
         ) : (
           <div className="console-text-idle" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
-            <span>Terminal ready. Write Python code and click "Run Code".</span>
+            <span>You must run your code first</span>
           </div>
         )}
       </div>

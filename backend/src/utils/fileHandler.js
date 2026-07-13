@@ -52,7 +52,9 @@ async function addHistoryEntry(entry) {
     executionTime: entry.executionTime || 0,
     output: entry.output || '',
     error: entry.error || '',
-    engine: entry.engine || ''
+    engine: entry.engine || '',
+    fileName: entry.fileName || '',
+    linesCount: entry.linesCount || 0
   };
   history.unshift(newEntry); // Newest first
   await writeHistory(history);
