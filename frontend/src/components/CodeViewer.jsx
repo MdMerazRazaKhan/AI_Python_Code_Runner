@@ -1,10 +1,86 @@
 import React, { useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { Play, Copy, Check, Download, AlertCircle, FileCode, Info } from 'lucide-react';
+import { Play, Copy, Check, Download, AlertCircle, FileCode, Info, AlignLeft } from 'lucide-react';
 
 export default function CodeViewer({ code, onChange, onExecute, isLoading, theme, explanation }) {
   const [copied, setCopied] = useState(false);
   const [showExplanation, setShowExplanation] = useState(true);
+
+  const handleAutoIndent = () => {
+    if (!code) return;
+    const lines = code.split('\n');
+    
+    // Check if the original code has any space/tab indentation at all
+    const hasIndentation = lines.some(line => /^[ \t]/.test(line));
+
+    // Detect the unit size of original indentation
+    let detectedSize = 4;
+    if (hasIndentation) {
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].replace(/\t/g, '    ');
+        const match = line.match(/^ +/);
+        if (match) {
+          const len = match[0].length;
+          if (len > 0) {
+            detectedSize = len;
+            break;
+          }
+        }
+      }
+    }
+
+    let currentIndent = 0; // standard levels (multiples of 4 spaces)
+    let lastOriginalLevel = 0;
+    const formattedLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const originalLine = lines[i];
+      const expandedLine = originalLine.replace(/\t/g, '    ');
+      const trimmed = expandedLine.trim();
+
+      if (!trimmed) {
+        formattedLines.push('');
+        continue;
+      }
+
+      // Calculate original level if file is indented
+      const leadingSpaces = expandedLine.search(/\S/);
+      const originalLevel = (hasIndentation && leadingSpaces > 0) 
+        ? Math.round(leadingSpaces / detectedSize) 
+        : 0;
+
+      // Heuristic 1: If original level decreased, decrease our currentIndent
+      if (hasIndentation && originalLevel < lastOriginalLevel) {
+        const diff = lastOriginalLevel - originalLevel;
+        currentIndent = Math.max(0, currentIndent - diff);
+      }
+
+      // Heuristic 2: Block continuation keywords always align with the block start
+      const isContinuation = /^(elif|else|except|finally)\b/.test(trimmed);
+      let renderIndent = currentIndent;
+      if (isContinuation && renderIndent > 0) {
+        renderIndent = Math.max(0, renderIndent - 1);
+        currentIndent = renderIndent;
+      }
+
+      // Add standard indentation
+      const spaces = ' '.repeat(renderIndent * 4);
+      formattedLines.push(spaces + trimmed);
+
+      // Heuristic 3: Check if this line starts a new block (ends with :)
+      const lineWithoutComments = trimmed.split('#')[0].trim();
+      const isBlockStart = lineWithoutComments.endsWith(':');
+
+      // Update tracking variables
+      lastOriginalLevel = originalLevel;
+      if (isBlockStart) {
+        currentIndent++;
+        lastOriginalLevel = originalLevel + 1;
+      }
+    }
+
+    onChange(formattedLines.join('\n'));
+  };
 
   const handleCopy = () => {
     if (!code) return;
@@ -66,6 +142,16 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
               <span>Explanation</span>
             </button>
           )}
+
+          <button
+            onClick={handleAutoIndent}
+            className="action-btn"
+            disabled={!code}
+            title="Auto Indent / Format Code"
+          >
+            <AlignLeft size={14} />
+            <span>Format</span>
+          </button>
 
           <button
             onClick={handleCopy}

@@ -6,7 +6,7 @@ async function generatePythonCode(prompt, apiKey) {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
   const systemInstruction = `
 You are an expert AI Python code generator. Your job is to generate Python code based on the user's prompt.
@@ -44,7 +44,7 @@ async function fixPythonCode(code, error, apiKey) {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
   const systemInstruction = `
 You are an expert Python debugging assistant. Your job is to analyze the provided Python code and its execution error/traceback, fix the code so it runs successfully without errors, and explain the fix.

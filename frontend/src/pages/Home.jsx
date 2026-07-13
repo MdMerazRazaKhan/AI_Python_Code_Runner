@@ -5,6 +5,8 @@ import OutputConsole from '../components/OutputConsole';
 import { getHistory, deleteHistoryItem, clearHistory, fixCode } from '../services/api';
 import ScratchNotes from '../components/ScratchNotes';
 
+const DEFAULT_NOTES = '';
+
 const DEFAULT_CODE = `# Welcome to the AI Python Code Runner
 # Write your Python code below
 # If any error occurs, click AI Quick Fix
@@ -128,8 +130,8 @@ export default function Home() {
     setHistoryLoading(true);
     try {
       const result = await getHistory();
-      if (result && result.success) {
-        setHistory(result.data || []);
+      if (result) {
+        setHistory(Array.isArray(result) ? result : (result.data || []));
       }
     } catch (err) {
       console.error('Failed to load history:', err);
@@ -226,8 +228,18 @@ export default function Home() {
 
   const handleSaveFileName = () => {
     let name = tempFileName.trim();
-    if (!name) name = 'untitled.py';
+    if (!name || name.toLowerCase() === 'untitled' || name.toLowerCase() === 'untitled.py') {
+      alert('Please enter a custom file name.');
+      return;
+    }
     if (!name.endsWith('.py')) name += '.py';
+
+    // Prevent duplicate filenames in history
+    const nameExists = history.some(item => item.fileName && item.fileName.toLowerCase() === name.toLowerCase());
+    if (nameExists) {
+      alert(`A file named "${name}" already exists. Please enter a different name.`);
+      return;
+    }
 
     // Only clear editor code and reset terminal if we are starting a subsequent new file
     if (activeFileName) {
@@ -513,11 +525,13 @@ export default function Home() {
               <RefreshCw className="spin-loader" size={18} style={{ opacity: 0.5 }} />
               <span>Loading logs...</span>
             </div>
-          ) : history.length === 0 ? (
+          ) : history.filter(item => item.fileName && item.fileName !== 'untitled.py').length === 0 ? (
             null
           ) : (
             <div className="history-list">
-              {history.map((item) => (
+              {history
+                .filter(item => item.fileName && item.fileName !== 'untitled.py')
+                .map((item, index) => (
                 <div
                   key={item.id}
                   className={`history-item animate-fade ${activeHistoryId === item.id ? 'active' : ''}`}
@@ -532,7 +546,7 @@ export default function Home() {
                     </div>
                     <div className="history-item-meta" style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '4px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span className={`status-indicator ${item.status?.toLowerCase() || 'success'}`} />
+                        <span className={`status-indicator ${index === 0 ? 'success' : 'error'}`} />
                         <span className="history-item-time">
                           {formatTime(item.timestamp)}
                         </span>
