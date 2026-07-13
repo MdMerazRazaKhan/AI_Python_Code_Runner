@@ -46,11 +46,13 @@ async function addHistoryEntry(entry) {
     id: entry.id || Date.now().toString(),
     prompt: entry.prompt || '',
     code: entry.code || '',
+    stdin: entry.stdin || '',
     timestamp: entry.timestamp || new Date().toISOString(),
     status: entry.status || 'Success',
     executionTime: entry.executionTime || 0,
     output: entry.output || '',
-    error: entry.error || ''
+    error: entry.error || '',
+    engine: entry.engine || ''
   };
   history.unshift(newEntry); // Newest first
   await writeHistory(history);

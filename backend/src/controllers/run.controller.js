@@ -9,7 +9,7 @@ function generateId() {
 
 async function executeCode(req, res, next) {
   try {
-    const { code, prompt } = req.body;
+    const { code, prompt, stdin } = req.body;
 
     // Validate the incoming code payload
     const validation = validateCode(code);
@@ -24,13 +24,14 @@ async function executeCode(req, res, next) {
     const timeoutMs = 5000;
 
     // Execute in the sandbox
-    const result = await dockerService.executeCode(code, timeoutMs);
+    const result = await dockerService.executeCode(code, timeoutMs, stdin);
 
     // Build the history record
     const historyEntry = {
       id: generateId(),
       prompt: prompt || '',
       code: code,
+      stdin: stdin || '',
       timestamp: new Date().toISOString(),
       status: result.status,
       executionTime: result.executionTime,

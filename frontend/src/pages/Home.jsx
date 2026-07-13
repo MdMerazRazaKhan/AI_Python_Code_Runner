@@ -24,11 +24,20 @@ export default function Home() {
   const [history, setHistory] = useState([]);
   
   // Console state
-  const [consoleOutput, setConsoleOutput] = useState('');
-  const [consoleError, setConsoleError] = useState('');
+  const [consoleLines, setConsoleLines] = useState([]);
   const [consoleTime, setConsoleTime] = useState(null);
   const [consoleStatus, setConsoleStatus] = useState('');
   const [consoleEngine, setConsoleEngine] = useState('');
+  const socketRef = React.useRef(null);
+
+  // Close WebSocket connection if component unmounts
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+    };
+  }, []);
   
   // Loading states
   const [isExecuting, setIsExecuting] = useState(false);
@@ -98,30 +107,62 @@ export default function Home() {
   };
 
   const executeAndLog = async (codeToRun, runPrompt = '') => {
+    if (socketRef.current) {
+      socketRef.current.close();
+    }
+
     setIsExecuting(true);
     setApiError(null);
-    setConsoleOutput('');
-    setConsoleError('');
+    setConsoleLines([]);
     setConsoleStatus('');
     setConsoleTime(null);
     setConsoleEngine('');
 
     try {
-      const result = await executeCode(codeToRun, runPrompt);
-      if (result) {
-        setConsoleOutput(result.output || '');
-        setConsoleError(result.error || '');
-        setConsoleStatus(result.status || 'Success');
-        setConsoleTime(result.executionTime);
-        setConsoleEngine(result.engine || '');
-        fetchHistory();
-      }
+      const wsUrl = `ws://${window.location.hostname}:5000`;
+      const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ type: 'run', code: codeToRun }));
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'stdout') {
+            setConsoleLines((prev) => [...prev, { type: 'stdout', text: message.data }]);
+          } else if (message.type === 'stderr') {
+            setConsoleLines((prev) => [...prev, { type: 'stderr', text: message.data }]);
+          } else if (message.type === 'exit') {
+            setConsoleStatus(message.status || 'Success');
+            setConsoleTime(message.executionTime);
+            setConsoleEngine(message.engine || '');
+            setIsExecuting(false);
+            fetchHistory();
+            socket.close();
+          }
+        } catch (err) {
+          console.error('WS parsing error:', err);
+        }
+      };
+
+      socket.onerror = (err) => {
+        console.error('WS Error:', err);
+        setConsoleLines((prev) => [...prev, { type: 'stderr', text: 'WebSocket Connection Error.\n' }]);
+        setConsoleStatus('Error');
+        setIsExecuting(false);
+      };
+
+      socket.onclose = () => {
+        socketRef.current = null;
+        setIsExecuting(false);
+      };
     } catch (err) {
-      setConsoleError(err.message || 'Error occurred during execution.');
+      setConsoleLines((prev) => [...prev, { type: 'stderr', text: err.message || 'Error occurred during execution.\n' }]);
       setConsoleStatus('Error');
       setConsoleTime(0);
       setConsoleEngine('');
-    } finally {
       setIsExecuting(false);
     }
   };
@@ -130,13 +171,21 @@ export default function Home() {
     executeAndLog(code);
   };
 
+  const getConsoleErrorText = () => {
+    return consoleLines
+      .filter((line) => line.type === 'stderr')
+      .map((line) => line.text)
+      .join('');
+  };
+
   const handleQuickFix = async () => {
-    if (!code || !consoleError) return;
+    const errorText = getConsoleErrorText();
+    if (!code || !errorText) return;
     setIsFixing(true);
     setApiError(null);
     try {
       // Pass the code and the error message to Gemini
-      const result = await fixCode(code, consoleError);
+      const result = await fixCode(code, errorText);
       if (result && result.code) {
         setCode(result.code);
         setExplanation(result.explanation || '');
@@ -179,8 +228,14 @@ export default function Home() {
   const handleSelectHistoryItem = (item) => {
     setCode(item.code);
     setExplanation('');
-    setConsoleOutput(item.output || '');
-    setConsoleError(item.error || '');
+    const historyLines = [];
+    if (item.output) {
+      historyLines.push({ type: 'stdout', text: item.output });
+    }
+    if (item.error) {
+      historyLines.push({ type: 'stderr', text: item.error });
+    }
+    setConsoleLines(historyLines);
     setConsoleStatus(item.status || '');
     setConsoleTime(item.executionTime);
     setConsoleEngine(item.engine || '');
@@ -188,11 +243,19 @@ export default function Home() {
   };
 
   const handleClearConsole = () => {
-    setConsoleOutput('');
-    setConsoleError('');
+    setConsoleLines([]);
     setConsoleStatus('');
     setConsoleTime(null);
     setConsoleEngine('');
+  };
+
+  const handleStdinSubmit = (inputValue) => {
+    // Append the typed user input with a newline to the console line stream
+    setConsoleLines((prev) => [...prev, { type: 'stdin', text: inputValue + '\n' }]);
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'stdin', data: inputValue + '\n' }));
+    }
   };
 
   const formatTime = (isoString) => {
@@ -323,8 +386,7 @@ export default function Home() {
         />
         
         <OutputConsole
-          output={consoleOutput}
-          error={consoleError}
+          lines={consoleLines}
           executionTime={consoleTime}
           status={consoleStatus}
           engine={consoleEngine}
@@ -332,6 +394,7 @@ export default function Home() {
           onClear={handleClearConsole}
           onQuickFix={handleQuickFix}
           isFixing={isFixing}
+          onStdinSubmit={handleStdinSubmit}
         />
       </main>
     </div>

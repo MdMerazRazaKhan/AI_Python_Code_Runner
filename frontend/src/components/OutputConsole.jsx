@@ -1,7 +1,21 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Terminal, Trash2, Cpu, Sparkles } from 'lucide-react';
 
-export default function OutputConsole({ output, error, executionTime, status, engine, isLoading, onClear, onQuickFix, isFixing }) {
+export default function OutputConsole({
+  lines = [],
+  executionTime,
+  status,
+  engine,
+  isLoading,
+  onClear,
+  onQuickFix,
+  isFixing,
+  onStdinSubmit
+}) {
+  const [inputValue, setInputValue] = useState('');
+  const consoleBodyRef = useRef(null);
+  const inputRef = useRef(null);
+
   const getStatusClass = () => {
     if (isLoading) return 'idle';
     if (!status) return 'idle';
@@ -14,19 +28,42 @@ export default function OutputConsole({ output, error, executionTime, status, en
     return status;
   };
 
-  const isError = status === 'Error' || (error && error.trim().length > 0);
+  // Check if there are errors in the execution
+  const hasError = lines.some((line) => line.type === 'stderr') || status === 'Error';
+
+  // Auto-scroll to the bottom of the console whenever output changes
+  useEffect(() => {
+    if (consoleBodyRef.current) {
+      consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight;
+    }
+  }, [lines, isLoading]);
+
+  // Focus the input field when clicking anywhere on the terminal console
+  const handleConsoleClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      const data = inputValue;
+      onStdinSubmit(data);
+      setInputValue('');
+    }
+  };
 
   return (
-    <div className="glass-panel console-panel animate-fade" style={{ height: '240px', minHeight: '180px', maxHeight: '380px' }}>
-      <div className="console-header">
+    <div className="glass-panel console-panel animate-fade" style={{ height: '300px', minHeight: '220px', maxHeight: '420px', display: 'flex', flexDirection: 'column' }}>
+      <div className="console-header" style={{ flexShrink: 0 }}>
         <div className="console-title-container">
           <Terminal size={14} className="console-title-icon" />
           <span>Execution Output Console</span>
         </div>
         
         <div className="console-meta">
-          {/* AI Quick Fix Button - Only shown when there is an active error */}
-          {isError && !isLoading && onQuickFix && (
+          {/* AI Quick Fix Button */}
+          {hasError && !isLoading && onQuickFix && (
             <button
               onClick={onQuickFix}
               disabled={isFixing}
@@ -91,7 +128,7 @@ export default function OutputConsole({ output, error, executionTime, status, en
             className="clear-history-btn"
             title="Clear Console"
             style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-            disabled={isLoading || (!output && !error)}
+            disabled={isLoading || lines.length === 0}
           >
             <Trash2 size={12} />
             Clear
@@ -99,22 +136,75 @@ export default function OutputConsole({ output, error, executionTime, status, en
         </div>
       </div>
       
-      <div className="console-body">
-        {isLoading ? (
-          <div className="console-text-idle" style={{ flexDirection: 'column', gap: '10px' }}>
+      <div 
+        ref={consoleBodyRef}
+        onClick={handleConsoleClick}
+        className="console-body"
+        style={{ 
+          flexGrow: 1, 
+          overflowY: 'auto', 
+          cursor: 'text', 
+          padding: '16px',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.85rem',
+          lineHeight: '1.5',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all'
+        }}
+      >
+        {lines.length > 0 ? (
+          <div style={{ display: 'inline' }}>
+            {lines.map((line, idx) => (
+              <span
+                key={idx}
+                className={`console-text-${line.type}`}
+                style={{
+                  color: line.type === 'stdout' ? 'var(--text-primary)' : line.type === 'stderr' ? '#f87171' : '#34d399',
+                  fontWeight: line.type === 'stdin' ? 'bold' : 'normal'
+                }}
+              >
+                {line.text}
+              </span>
+            ))}
+            
+            {/* Inline dynamic terminal input */}
+            {isLoading && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', position: 'relative' }}>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    color: '#34d399',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.85rem',
+                    padding: 0,
+                    margin: 0,
+                    fontWeight: 'bold',
+                    width: `${Math.max(1, inputValue.length) * 8}px`,
+                    minWidth: '10px',
+                    caretColor: 'var(--accent-color)'
+                  }}
+                  autoFocus
+                />
+              </span>
+            )}
+          </div>
+        ) : isLoading ? (
+          <div className="console-text-idle" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '10px', color: 'var(--text-secondary)' }}>
             <svg className="spin-loader" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
               <circle cx="12" cy="12" r="10" strokeDasharray="40" strokeDashoffset="10" />
             </svg>
-            <span>Executing Python code in sandboxed runtime...</span>
+            <span>Starting execution environment...</span>
           </div>
-        ) : error || output ? (
-          <>
-            {output && <div className="console-text-stdout">{output}</div>}
-            {error && <div className="console-text-stderr">{error}</div>}
-          </>
         ) : (
-          <div className="console-text-idle">
-            <span>Terminal ready. Write Python code in the editor above and click "Run Code".</span>
+          <div className="console-text-idle" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
+            <span>Terminal ready. Write Python code and click "Run Code".</span>
           </div>
         )}
       </div>

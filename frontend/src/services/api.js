@@ -76,13 +76,13 @@ export async function saveApiKey(apiKey) {
 /**
  * Execute Python code.
  */
-export async function executeCode(code, prompt = '') {
+export async function executeCode(code, prompt = '', stdin = '') {
   const response = await fetch(`${API_BASE_URL}/run/execute`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ code, prompt }),
+    body: JSON.stringify({ code, prompt, stdin }),
   });
   return handleResponse(response);
 }
