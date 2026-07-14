@@ -10,27 +10,8 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
     if (!code) return;
     const lines = code.split('\n');
     
-    // Check if the original code has any space/tab indentation at all
-    const hasIndentation = lines.some(line => /^[ \t]/.test(line));
-
-    // Detect the unit size of original indentation
-    let detectedSize = 4;
-    if (hasIndentation) {
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].replace(/\t/g, '    ');
-        const match = line.match(/^ +/);
-        if (match) {
-          const len = match[0].length;
-          if (len > 0) {
-            detectedSize = len;
-            break;
-          }
-        }
-      }
-    }
-
-    let currentIndent = 0; // standard levels (multiples of 4 spaces)
-    let lastOriginalLevel = 0;
+    const indentStack = [{ originalSpaces: 0, formattedSpaces: 0 }];
+    let lastLineWasBlockStart = false;
     const formattedLines = [];
 
     for (let i = 0; i < lines.length; i++) {
@@ -43,40 +24,48 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
         continue;
       }
 
-      // Calculate original level if file is indented
-      const leadingSpaces = expandedLine.search(/\S/);
-      const originalLevel = (hasIndentation && leadingSpaces > 0) 
-        ? Math.round(leadingSpaces / detectedSize) 
-        : 0;
+      // Calculate leading spaces
+      const match = expandedLine.match(/^ */);
+      const originalSpaces = match ? match[0].length : 0;
 
-      // Heuristic 1: If original level decreased, decrease our currentIndent
-      if (hasIndentation && originalLevel < lastOriginalLevel) {
-        const diff = lastOriginalLevel - originalLevel;
-        currentIndent = Math.max(0, currentIndent - diff);
+      // Pop from stack to match current indentation level
+      while (
+        indentStack.length > 1 && 
+        originalSpaces <= indentStack[indentStack.length - 1].originalSpaces &&
+        !lastLineWasBlockStart
+      ) {
+        indentStack.pop();
       }
 
-      // Heuristic 2: Block continuation keywords always align with the block start
-      const isContinuation = /^(elif|else|except|finally)\b/.test(trimmed);
-      let renderIndent = currentIndent;
-      if (isContinuation && renderIndent > 0) {
-        renderIndent = Math.max(0, renderIndent - 1);
-        currentIndent = renderIndent;
+      let renderIndentSpaces = 0;
+
+      if (lastLineWasBlockStart) {
+        // Force one level deeper than parent block
+        const parent = indentStack[indentStack.length - 1];
+        const newFormatted = parent.formattedSpaces + 4;
+        const newOriginal = Math.max(originalSpaces, parent.originalSpaces + 1);
+        indentStack.push({ originalSpaces: newOriginal, formattedSpaces: newFormatted });
+        renderIndentSpaces = newFormatted;
+      } else {
+        if (originalSpaces > indentStack[indentStack.length - 1].originalSpaces) {
+          // User indented explicitly
+          const parent = indentStack[indentStack.length - 1];
+          const newFormatted = parent.formattedSpaces + 4;
+          indentStack.push({ originalSpaces, formattedSpaces: newFormatted });
+          renderIndentSpaces = newFormatted;
+        } else {
+          renderIndentSpaces = indentStack[indentStack.length - 1].formattedSpaces;
+        }
       }
 
-      // Add standard indentation
-      const spaces = ' '.repeat(renderIndent * 4);
+      // Render the line
+      const spaces = ' '.repeat(renderIndentSpaces);
       formattedLines.push(spaces + trimmed);
 
-      // Heuristic 3: Check if this line starts a new block (ends with :)
+      // Check if this line starts a block
       const lineWithoutComments = trimmed.split('#')[0].trim();
       const isBlockStart = lineWithoutComments.endsWith(':');
-
-      // Update tracking variables
-      lastOriginalLevel = originalLevel;
-      if (isBlockStart) {
-        currentIndent++;
-        lastOriginalLevel = originalLevel + 1;
-      }
+      lastLineWasBlockStart = isBlockStart;
     }
 
     onChange(formattedLines.join('\n'));

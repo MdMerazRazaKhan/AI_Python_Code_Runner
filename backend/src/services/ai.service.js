@@ -1,12 +1,29 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+const MODELS_TO_TRY = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+
+async function callWithFallback(genAI, options) {
+  let lastError = null;
+  for (const modelName of MODELS_TO_TRY) {
+    try {
+      console.log(`Attempting Gemini API with model: ${modelName}...`);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(options);
+      return result;
+    } catch (error) {
+      console.warn(`Gemini model ${modelName} failed, attempting next model... Error:`, error.message || error);
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('All attempted Gemini models failed.');
+}
+
 async function generatePythonCode(prompt, apiKey) {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not defined. Please configure it in your backend/.env file.');
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
   const systemInstruction = `
 You are an expert AI Python code generator. Your job is to generate Python code based on the user's prompt.
@@ -18,7 +35,7 @@ You MUST respond with a JSON object. The JSON object must contain exactly two fi
   const promptText = `${systemInstruction}\n\nUser request: ${prompt}`;
 
   try {
-    const result = await model.generateContent({
+    const result = await callWithFallback(genAI, {
       contents: [{ role: 'user', parts: [{ text: promptText }] }],
       generationConfig: {
         responseMimeType: 'application/json',
@@ -44,7 +61,6 @@ async function fixPythonCode(code, error, apiKey) {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
   const systemInstruction = `
 You are an expert Python debugging assistant. Your job is to analyze the provided Python code and its execution error/traceback, fix the code so it runs successfully without errors, and explain the fix.
@@ -69,7 +85,7 @@ ${error}
 `;
 
   try {
-    const result = await model.generateContent({
+    const result = await callWithFallback(genAI, {
       contents: [{ role: 'user', parts: [{ text: promptText }] }],
       systemInstruction: systemInstruction,
       generationConfig: {
