@@ -40,21 +40,36 @@ async function writeHistory(history) {
 }
 
 async function addHistoryEntry(entry) {
-  const history = await readHistory();
-  // entry should have id, prompt, code, timestamp, status, executionTime, output, error
+  let history = await readHistory();
+  let idToUse = entry.id || Date.now().toString();
+
+  if (entry.fileName) {
+    const existingIndex = history.findIndex(item => 
+      item.fileName && 
+      item.fileName.toLowerCase() === entry.fileName.toLowerCase()
+    );
+    if (existingIndex !== -1) {
+      idToUse = history[existingIndex].id;
+      history.splice(existingIndex, 1);
+    }
+  }
+
   const newEntry = {
-    id: entry.id || Date.now().toString(),
+    id: idToUse,
     prompt: entry.prompt || '',
     code: entry.code || '',
     stdin: entry.stdin || '',
     timestamp: entry.timestamp || new Date().toISOString(),
     status: entry.status || 'Success',
     executionTime: entry.executionTime || 0,
+    memoryUsage: entry.memoryUsage || 0,
+    exitCode: entry.exitCode !== undefined ? entry.exitCode : 0,
     output: entry.output || '',
     error: entry.error || '',
     engine: entry.engine || '',
     fileName: entry.fileName || '',
-    linesCount: entry.linesCount || 0
+    linesCount: entry.linesCount || 0,
+    language: entry.language || 'python'
   };
   history.unshift(newEntry); // Newest first
   await writeHistory(history);
@@ -73,10 +88,22 @@ async function clearHistory() {
   return true;
 }
 
+async function updateHistoryEntry(id, updates) {
+  const history = await readHistory();
+  const index = history.findIndex(item => item.id === id);
+  if (index !== -1) {
+    history[index] = { ...history[index], ...updates };
+    await writeHistory(history);
+    return history[index];
+  }
+  return null;
+}
+
 module.exports = {
   readHistory,
   writeHistory,
   addHistoryEntry,
   deleteHistoryEntry,
-  clearHistory
+  clearHistory,
+  updateHistoryEntry
 };

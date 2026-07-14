@@ -114,3 +114,31 @@ export async function clearHistory() {
   });
   return handleResponse(response);
 }
+
+/**
+ * Update a specific history item.
+ */
+export async function updateHistoryItem(id, updates) {
+  const response = await fetch(`${API_BASE_URL}/run/history/${id}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(updates),
+  });
+  return handleResponse(response);
+}
+
+/**
+ * Create a new history item.
+ */
+export async function createHistoryItem(fileName, language, code) {
+  const response = await fetch(`${API_BASE_URL}/run/history`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fileName, language, code }),
+  });
+  return handleResponse(response);
+}

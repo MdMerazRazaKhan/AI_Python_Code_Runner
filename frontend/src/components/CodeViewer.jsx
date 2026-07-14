@@ -1,10 +1,55 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
-import { Play, Copy, Check, Download, AlertCircle, FileCode, Info, AlignLeft } from 'lucide-react';
+import { Play, Copy, Check, Download, AlertCircle, FileCode, Info, AlignLeft, Maximize2, Minimize2 } from 'lucide-react';
 
-export default function CodeViewer({ code, onChange, onExecute, isLoading, theme, explanation }) {
+export default function CodeViewer({ 
+  code, 
+  onChange, 
+  onExecute, 
+  isLoading, 
+  theme, 
+  explanation, 
+  language = 'python',
+  fontSize = 14,
+  setFontSize,
+  isFullscreen,
+  onToggleFullscreen,
+  openTabs = [],
+  activeHistoryId,
+  onSelectTab,
+  onCloseTab,
+  history = []
+}) {
   const [copied, setCopied] = useState(false);
-  const [showExplanation, setShowExplanation] = useState(true);
+  const [showExplanationModal, setShowExplanationModal] = useState(false);
+
+  useEffect(() => {
+    if (explanation) {
+      setShowExplanationModal(true);
+    }
+  }, [explanation]);
+
+  const getBulletPoints = (text) => {
+    if (!text) return [];
+    if (text.includes('\n')) {
+      return text.split('\n')
+        .map(line => line.trim())
+        .map(line => line.replace(/^[-*•\d+.\)]\s*/, '').trim())
+        .filter(line => line.length > 0);
+    }
+    const parts = text.split(/(?=\b\d+[\)]\s*)|(?=\b\d+\.\s+[A-Z])/);
+    if (parts.length > 1) {
+      return parts
+        .map(part => part.trim())
+        .map(part => part.replace(/^\d+[\.\)]\s*/, '').trim())
+        .filter(part => part.length > 0);
+    }
+    const sentences = text.match(/[^.!?]+[.!?]+(\s|$)/g);
+    if (sentences && sentences.length > 0) {
+      return sentences.map(s => s.trim()).filter(s => s.length > 0);
+    }
+    return [text.trim()];
+  };
 
   const handleAutoIndent = () => {
     if (!code) return;
@@ -72,18 +117,25 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
   };
 
   const handleCopy = () => {
-    if (!code) return;
     navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleDownload = () => {
-    if (!code) return;
+    const extMap = { python: 'py', java: 'java', cpp: 'cpp', c: 'c' };
+    const ext = extMap[language] || 'py';
+    
+    let fileName = 'main';
+    const activeFile = Array.isArray(history) ? history.find(h => h.id === activeHistoryId) : null;
+    if (activeFile && activeFile.fileName) {
+      fileName = activeFile.fileName.replace(/\.[a-zA-Z0-9]+$/, '');
+    }
+
     const element = document.createElement("a");
     const file = new Blob([code], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
-    element.download = "script.py";
+    element.download = `${fileName}.${ext}`;
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
@@ -95,10 +147,9 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
       inherit: true,
       rules: [
         { token: 'comment', foreground: '9c8470', fontStyle: 'italic' },
-        { token: 'keyword', foreground: '895129', fontWeight: 'bold' },
-        { token: 'string', foreground: '059669' },
-        { token: 'number', foreground: 'd97706' },
-        { token: 'delimiter', foreground: '3d2b1f' },
+        { token: 'keyword', foreground: '895129', fontStyle: 'bold' },
+        { token: 'string', foreground: '5c7a5c' },
+        { token: 'number', foreground: 'a05a5a' },
       ],
       colors: {
         'editor.background': '#fdfbf7',
@@ -111,21 +162,25 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
     });
   };
 
+  const validTabs = Array.isArray(history) ? history.filter(h => openTabs.includes(h.id)) : [];
+
   return (
-    <div className="glass-panel editor-panel animate-fade" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className={`glass-panel editor-panel animate-fade ${isFullscreen ? 'fullscreen-editor-container' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <div className="editor-header">
         <div className="editor-title-container">
           <FileCode size={18} className="editor-icon" />
-          <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>Python Code Editor</h3>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>
+            {language === 'python' ? 'Python' : language === 'java' ? 'Java' : language === 'cpp' ? 'C++' : 'C'} Code Editor
+          </h3>
         </div>
         
         <div className="editor-actions">
+
           {explanation && (
             <button
-              onClick={() => setShowExplanation(!showExplanation)}
+              onClick={() => setShowExplanationModal(true)}
               className="action-btn"
-              title="Toggle AI Explanation"
-              style={{ borderColor: showExplanation ? 'var(--accent-color)' : 'var(--border-color)' }}
+              title="Show AI Explanation Pop-up"
             >
               <Info size={14} />
               <span>Explanation</span>
@@ -156,10 +211,19 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
             onClick={handleDownload}
             className="action-btn"
             disabled={!code}
-            title="Download .py File"
+            title={`Download File`}
           >
             <Download size={14} />
             <span>Download</span>
+          </button>
+
+          <button
+            onClick={onToggleFullscreen}
+            className="action-btn"
+            title={isFullscreen ? "Exit Fullscreen Editor" : "Fullscreen Editor"}
+          >
+            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            <span>{isFullscreen ? "Exit" : "Fullscreen"}</span>
           </button>
           
           <button
@@ -180,39 +244,84 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
         </div>
       </div>
 
-      {explanation && showExplanation && (
-        <div
-          className="animate-fade"
-          style={{
-            padding: '12px 16px',
-            background: 'rgba(var(--accent-color-rgb), 0.05)',
-            borderBottom: '1px solid var(--border-color)',
-            fontSize: '0.85rem',
-            color: 'var(--text-secondary)',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '8px'
-          }}
-        >
-          <AlertCircle size={15} style={{ color: 'var(--accent-color)', flexShrink: 0, marginTop: '2px' }} />
-          <div>
-            <strong style={{ color: 'var(--text-primary)' }}>AI Explanation: </strong>
-            {explanation}
-          </div>
+      {validTabs.length > 0 && (
+        <div className="editor-tabs-bar" style={{
+          display: 'flex',
+          background: 'var(--bg-secondary)',
+          borderBottom: '1px solid var(--border-color)',
+          overflowX: 'auto',
+          gap: '2px',
+          padding: '4px 8px 0 8px',
+          flexShrink: 0
+        }}>
+          {validTabs.map(tab => {
+            const isActive = tab.id === activeHistoryId;
+            return (
+              <div
+                key={tab.id}
+                onClick={() => onSelectTab(tab.id)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 12px',
+                  background: isActive ? 'var(--bg-primary)' : 'rgba(0,0,0,0.15)',
+                  borderTopLeftRadius: '6px',
+                  borderTopRightRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  borderBottom: isActive ? '1px solid var(--bg-primary)' : '1px solid var(--border-color)',
+                  fontSize: '0.75rem',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontWeight: isActive ? 600 : 400,
+                  transition: 'all 0.15s ease',
+                  position: 'relative',
+                  top: '1px',
+                  height: '28px',
+                  boxSizing: 'border-box'
+                }}
+              >
+                <span>{tab.fileName}</span>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCloseTab(tab.id);
+                  }}
+                  style={{
+                    fontSize: '11px',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '0 2px',
+                    borderRadius: '50%',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '14px',
+                    height: '14px',
+                    transition: 'background 0.15s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  &times;
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
 
       <div className="editor-body">
         <Editor
           height="100%"
-          defaultLanguage="python"
+          language={language === 'python' ? 'python' : language === 'java' ? 'java' : language === 'cpp' ? 'cpp' : 'c'}
           value={code}
           onChange={onChange}
           theme={theme === 'dark' ? 'vs-dark' : 'creamBrown'}
           beforeMount={handleEditorBeforeMount}
           options={{
             minimap: { enabled: false },
-            fontSize: 14,
+            fontSize: fontSize,
             fontFamily: "var(--font-mono)",
             automaticLayout: true,
             lineNumbers: 'on',
@@ -229,6 +338,68 @@ export default function CodeViewer({ code, onChange, onExecute, isLoading, theme
           }
         />
       </div>
+
+      {showExplanationModal && explanation && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.4)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          borderRadius: '8px'
+        }}>
+          <div className="glass-panel animate-fade" style={{
+            width: '420px',
+            padding: '24px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '12px',
+            boxShadow: 'var(--shadow-main)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.95rem' }}>
+              <Info size={16} style={{ color: 'var(--accent-color)' }} />
+              <span>AI Debug Explanation</span>
+            </div>
+            
+            <div style={{
+              fontSize: '0.85rem',
+              color: 'var(--text-secondary)',
+              lineHeight: '1.6',
+              maxHeight: '260px',
+              overflowY: 'auto',
+              paddingRight: '4px'
+            }}>
+              <ul style={{ paddingLeft: '16px', margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {getBulletPoints(explanation).map((point, idx) => (
+                  <li key={idx} style={{ listStyleType: 'disc' }}>
+                    {point}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+              <button
+                onClick={() => setShowExplanationModal(false)}
+                className="action-btn"
+                style={{
+                  padding: '8px 20px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600
+                }}
+              >
+                Back
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

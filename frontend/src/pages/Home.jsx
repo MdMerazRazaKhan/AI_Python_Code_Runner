@@ -1,21 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, Trash2, Sun, Moon, Database, Clock, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Terminal, Trash2, Sun, Moon, Database, Clock, RefreshCw, AlertTriangle, Edit2 } from 'lucide-react';
 import CodeViewer from '../components/CodeViewer';
 import OutputConsole from '../components/OutputConsole';
-import { getHistory, deleteHistoryItem, clearHistory, fixCode } from '../services/api';
+import { getHistory, deleteHistoryItem, clearHistory, fixCode, updateHistoryItem, createHistoryItem } from '../services/api';
 import ScratchNotes from '../components/ScratchNotes';
+import JSZip from 'jszip';
 
 const DEFAULT_NOTES = '';
 
-const DEFAULT_CODE = `# Welcome to the AI Python Code Runner
-# Write your Python code below
-# If any error occurs, click AI Quick Fix
+const CODE_TEMPLATES = {
+  python: `# Welcome to the AI CodeOrbit\n# If any error occurs click AI Quick Fix\n\nprint("Hello World")`,
+  c: `// Welcome to the AI CodeOrbit\n// If any error occurs click AI Quick Fix\n\n#include <stdio.h>\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`,
+  cpp: `// Welcome to the AI CodeOrbit\n// If any error occurs click AI Quick Fix\n\n#include <iostream>\n\nint main() {\n    std::cout << "Hello, World!" << std::endl;\n    return 0;\n}`,
+  java: `// Welcome to the AI CodeOrbit\n// If any error occurs click AI Quick Fix\n\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}`
+};
 
-print("Hello World")
-`;
+const DEFAULT_CODE = `# Welcome to the AI CodeOrbit\n# If any error occurs click AI Quick Fix\n\nprint("Hello World")`;
 
 export default function Home() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+  const [selectedLanguage, setSelectedLanguage] = useState('python');
   const [code, setCode] = useState(DEFAULT_CODE);
   const [explanation, setExplanation] = useState('');
   const [history, setHistory] = useState([]);
@@ -25,11 +29,65 @@ export default function Home() {
   const [consoleTime, setConsoleTime] = useState(null);
   const [consoleStatus, setConsoleStatus] = useState('');
   const [consoleEngine, setConsoleEngine] = useState('');
+  const [consoleMemory, setConsoleMemory] = useState(null);
+  const [consoleExitCode, setConsoleExitCode] = useState(null);
   const socketRef = useRef(null);
 
   // Layout state
   const [layout, setLayout] = useState('default'); // 'default' | 'leet' | 'note-taking' | 'debug'
   const [showLayoutDropdown, setShowLayoutDropdown] = useState(false);
+  const [showLangDropdown, setShowLangDropdown] = useState(false);
+
+  // Phase 1 states
+  const [fontSize, setFontSize] = useState(14);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState('Saved');
+  const [openTabs, setOpenTabs] = useState([]);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameItemId, setRenameItemId] = useState(null);
+  const [renameItemName, setRenameItemName] = useState('');
+
+  // Phase 2 Multiple Test Cases states
+  const [testCases, setTestCases] = useState([
+    { id: 1, input: '', expected: '' }
+  ]);
+  const [testCaseResults, setTestCaseResults] = useState(null);
+
+  // Compiler version selection
+  const [compilerVersion, setCompilerVersion] = useState('3');
+  const [showVersionDropdown, setShowVersionDropdown] = useState(false);
+
+  const getAvailableVersions = (lang) => {
+    switch (lang) {
+      case 'cpp':
+        return [
+          { value: 'c++20', label: 'C++20' },
+          { value: 'c++17', label: 'C++17' },
+          { value: 'c++14', label: 'C++14' }
+        ];
+      case 'c':
+        return [
+          { value: 'c11', label: 'C11' },
+          { value: 'c99', label: 'C99' }
+        ];
+      case 'java':
+        return [
+          { value: '17', label: 'Java 17' },
+          { value: '8', label: 'Java 8' }
+        ];
+      default:
+        return [{ value: '3', label: 'Python 3' }];
+    }
+  };
+
+  const getCompilerVersionLabel = () => {
+    const list = getAvailableVersions(selectedLanguage);
+    const match = list.find(item => item.value === compilerVersion);
+    return match ? match.label : 'Python 3';
+  };
+
+  // Refs for tracking tab changes and switching
+  const isSwitchingFileRef = useRef(false);
 
   // Timer state
   const [timerSeconds, setTimerSeconds] = useState(0);
@@ -38,7 +96,23 @@ export default function Home() {
 
   // Floating Notes panel state
   const [showNotesDrawer, setShowNotesDrawer] = useState(false);
-  const [notesContent, setNotesContent] = useState(() => localStorage.getItem('personal_notes') || DEFAULT_NOTES);
+  const [notesContent, setNotesContent] = useState(() => {
+    const stored = localStorage.getItem('personal_notes');
+    if (stored && (
+      stored.includes('Markdown Editor Toolbar Guide') || 
+      stored.includes('italic text') || 
+      stored.includes('Make your notes here') ||
+      stored.includes('Alt text') ||
+      stored.includes('example.com') ||
+      stored.includes('Blockquote') ||
+      stored.includes('Mechanism') ||
+      stored.includes('preview layout')
+    )) {
+      localStorage.setItem('personal_notes', '');
+      return '';
+    }
+    return stored || '';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Active script file naming states
@@ -68,29 +142,6 @@ export default function Home() {
     fetchHistory();
   }, []);
 
-  // Clear old notes guide content from local storage on mount if present
-  useEffect(() => {
-    const storedNotes = localStorage.getItem('personal_notes');
-    if (storedNotes && (
-      storedNotes.includes('Markdown Editor Toolbar Guide') || 
-      storedNotes.includes('italic text') || 
-      storedNotes.includes('Make your notes here') ||
-      storedNotes.includes('Alt text') ||
-      storedNotes.includes('example.com') ||
-      storedNotes.includes('Blockquote')
-    )) {
-      setNotesContent('');
-      localStorage.setItem('personal_notes', '');
-    }
-  }, []);
-
-  // Open file naming modal unconditionally on initial site load if no file name is set
-  useEffect(() => {
-    if (!activeFileName) {
-      setShowFileNameModal(true);
-    }
-  }, []);
-
   // Close WebSocket connection if component unmounts
   useEffect(() => {
     return () => {
@@ -111,16 +162,19 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [timerActive]);
 
-  // Click outside to close layout dropdown
+  // Click outside to close dropdowns
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (showLayoutDropdown && !e.target.closest('.icon-btn-leetcode') && !e.target.closest('.glass-panel')) {
         setShowLayoutDropdown(false);
       }
+      if (showLangDropdown && !e.target.closest('.action-btn') && !e.target.closest('.glass-panel')) {
+        setShowLangDropdown(false);
+      }
     };
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [showLayoutDropdown]);
+  }, [showLayoutDropdown, showLangDropdown]);
 
   const handleToggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
@@ -131,13 +185,165 @@ export default function Home() {
     try {
       const result = await getHistory();
       if (result) {
-        setHistory(Array.isArray(result) ? result : (result.data || []));
+        const list = Array.isArray(result) ? result : (result.data || []);
+        setHistory(list);
+        
+        // Auto-select the first named file from history on load if available and no file is active
+        if (!activeFileName && list.length > 0) {
+          const firstNamed = list.find(item => item.fileName && item.fileName !== 'untitled.py');
+          if (firstNamed) {
+            isSwitchingFileRef.current = true;
+            handleSelectHistoryItem(firstNamed);
+            setOpenTabs([firstNamed.id]);
+          } else {
+            setShowFileNameModal(true);
+          }
+        } else if (!activeFileName) {
+          setShowFileNameModal(true);
+        }
       }
     } catch (err) {
       console.error('Failed to load history:', err);
+      if (!activeFileName) {
+        setShowFileNameModal(true);
+      }
     } finally {
       setHistoryLoading(false);
     }
+  };
+
+  // Debounced auto-save effect
+  useEffect(() => {
+    if (isSwitchingFileRef.current) {
+      isSwitchingFileRef.current = false;
+      return;
+    }
+
+    if (!activeHistoryId) return;
+
+    setAutoSaveStatus('Saving...');
+    const delay = setTimeout(async () => {
+      try {
+        await updateHistoryItem(activeHistoryId, { code });
+        setHistory(prev => prev.map(item => 
+          item.id === activeHistoryId ? { ...item, code } : item
+        ));
+        setAutoSaveStatus('Saved');
+      } catch (err) {
+        console.error('Auto-save error:', err);
+        setAutoSaveStatus('Error');
+      }
+    }, 1000);
+
+    return () => clearTimeout(delay);
+  }, [code]);
+
+  const handleRenameClick = (e, id, currentName) => {
+    e.stopPropagation();
+    setRenameItemId(id);
+    setRenameItemName(currentName || '');
+    setShowRenameModal(true);
+  };
+
+  const handleSaveRename = async () => {
+    let name = renameItemName.trim();
+    if (!name) return;
+
+    const item = history.find(h => h.id === renameItemId);
+    const itemLang = item ? item.language : 'python';
+    const extMap = { python: '.py', java: '.java', cpp: '.cpp', c: '.c' };
+    const currentExt = extMap[itemLang] || '.py';
+
+    if (!name.endsWith(currentExt)) {
+      const base = name.replace(/\.[a-zA-Z0-9]+$/, '');
+      name = base + currentExt;
+    }
+
+    const nameExists = history.some(h => h.id !== renameItemId && h.fileName && h.fileName.toLowerCase() === name.toLowerCase());
+    if (nameExists) {
+      alert(`A file named "${name}" already exists. Please enter a different name.`);
+      return;
+    }
+
+    try {
+      await updateHistoryItem(renameItemId, { fileName: name });
+      setHistory(prev => prev.map(h => 
+        h.id === renameItemId ? { ...h, fileName: name } : h
+      ));
+      if (renameItemId === activeHistoryId) {
+        setActiveFileName(name);
+      }
+      setShowRenameModal(false);
+    } catch (err) {
+      console.error('Failed to rename file:', err);
+      alert('Failed to rename file. Please try again.');
+    }
+  };
+
+  const handleExportWorkspace = async () => {
+    const zip = new JSZip();
+    const validFiles = history.filter(h => h.fileName && h.fileName !== 'untitled.py');
+    if (validFiles.length === 0) {
+      alert('No files available to export in the workspace.');
+      return;
+    }
+    validFiles.forEach(item => {
+      zip.file(item.fileName, item.code);
+    });
+    try {
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `codeorbit_workspace_${Date.now()}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export workspace zip:', err);
+      alert('Failed to generate ZIP archive.');
+    }
+  };
+
+  const handleImportWorkspace = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const zip = await JSZip.loadAsync(event.target.result);
+        const importedEntries = [];
+        
+        for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
+          if (zipEntry.dir) continue;
+          const content = await zipEntry.async('string');
+          
+          let lang = 'python';
+          if (relativePath.endsWith('.java')) lang = 'java';
+          else if (relativePath.endsWith('.cpp')) lang = 'cpp';
+          else if (relativePath.endsWith('.c')) lang = 'c';
+          
+          const newEntry = await createHistoryItem(relativePath, lang, content);
+          if (newEntry) {
+            importedEntries.push(newEntry);
+          }
+        }
+        
+        if (importedEntries.length > 0) {
+          await fetchHistory();
+          alert(`Successfully imported ${importedEntries.length} files from ZIP!`);
+        } else {
+          alert('No files were found in the uploaded ZIP.');
+        }
+      } catch (err) {
+        console.error('Error importing ZIP:', err);
+        alert('Failed to read ZIP file. Make sure it is a valid zip archive.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
   };
 
   const handleDeleteHistoryItem = async (e, id) => {
@@ -145,11 +351,82 @@ export default function Home() {
     try {
       await deleteHistoryItem(id);
       setHistory(prev => prev.filter(item => item.id !== id));
+      setOpenTabs(prev => prev.filter(tid => tid !== id));
       if (activeHistoryId === id) {
         setActiveHistoryId(null);
+        setActiveFileName('');
+        setCode('');
+        setConsoleLines([]);
+        setConsoleStatus('');
+        setConsoleTime(null);
+        setConsoleEngine('');
+        setConsoleMemory(null);
+        setConsoleExitCode(null);
+        setTestCaseResults(null);
       }
     } catch (err) {
       console.error('Failed to delete history item:', err);
+    }
+  };
+
+  const handleRunTestCases = async (activeCases) => {
+    setIsExecuting(true);
+    setTestCaseResults(null);
+    setConsoleStatus('Running Tests...');
+    setConsoleLines([]);
+
+    try {
+      const wsUrl = `ws://${window.location.hostname}:5000`;
+      const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        socket.send(JSON.stringify({
+          type: 'run_tests',
+          code,
+          fileName: activeFileName,
+          language: selectedLanguage,
+          testCases: activeCases,
+          version: compilerVersion
+        }));
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'test_cases_exit') {
+            setIsExecuting(false);
+            if (message.error) {
+              setConsoleLines([{ type: 'stderr', text: message.error + '\n' }]);
+              setConsoleStatus('Compile Error');
+            } else {
+              setTestCaseResults(message.results);
+              const passedCount = message.results.filter(r => r.passed).length;
+              const totalCount = message.results.length;
+              setConsoleStatus(passedCount === totalCount ? 'All Passed' : `${passedCount}/${totalCount} Passed`);
+            }
+            socket.close();
+          }
+        } catch (err) {
+          console.error('Test parse error:', err);
+        }
+      };
+
+      socket.onerror = (err) => {
+        console.error('Test WS Error:', err);
+        setConsoleLines([{ type: 'stderr', text: 'WebSocket Connection Error during test case run.\n' }]);
+        setConsoleStatus('Error');
+        setIsExecuting(false);
+      };
+
+      socket.onclose = () => {
+        socketRef.current = null;
+        setIsExecuting(false);
+      };
+    } catch (err) {
+      setConsoleLines([{ type: 'stderr', text: err.message || 'Error occurred.\n' }]);
+      setConsoleStatus('Error');
+      setIsExecuting(false);
     }
   };
 
@@ -159,6 +436,13 @@ export default function Home() {
         await clearHistory();
         setHistory([]);
         setActiveHistoryId(null);
+        setTestCaseResults(null);
+        setConsoleLines([]);
+        setConsoleStatus('');
+        setConsoleTime(null);
+        setConsoleEngine('');
+        setConsoleMemory(null);
+        setConsoleExitCode(null);
       } catch (err) {
         console.error('Failed to clear history:', err);
       }
@@ -176,6 +460,8 @@ export default function Home() {
     setConsoleStatus('');
     setConsoleTime(null);
     setConsoleEngine('');
+    setConsoleMemory(null);
+    setConsoleExitCode(null);
 
     try {
       const wsUrl = `ws://${window.location.hostname}:5000`;
@@ -183,7 +469,7 @@ export default function Home() {
       socketRef.current = socket;
 
       socket.onopen = () => {
-        socket.send(JSON.stringify({ type: 'run', code: codeToRun, fileName: activeFileName }));
+        socket.send(JSON.stringify({ type: 'run', code: codeToRun, fileName: activeFileName, language: selectedLanguage, version: compilerVersion }));
       };
 
       socket.onmessage = (event) => {
@@ -197,6 +483,8 @@ export default function Home() {
             setConsoleStatus(message.status || 'Success');
             setConsoleTime(message.executionTime);
             setConsoleEngine(message.engine || '');
+            setConsoleMemory(message.memoryUsage || null);
+            setConsoleExitCode(message.code !== undefined ? message.code : null);
             setIsExecuting(false);
             fetchHistory();
             socket.close();
@@ -222,17 +510,26 @@ export default function Home() {
       setConsoleStatus('Error');
       setConsoleTime(0);
       setConsoleEngine('');
+      setConsoleMemory(null);
+      setConsoleExitCode(null);
       setIsExecuting(false);
     }
   };
 
-  const handleSaveFileName = () => {
+  const handleSaveFileName = async () => {
     let name = tempFileName.trim();
-    if (!name || name.toLowerCase() === 'untitled' || name.toLowerCase() === 'untitled.py') {
+    const extMap = { python: '.py', java: '.java', cpp: '.cpp', c: '.c' };
+    const currentExt = extMap[selectedLanguage] || '.py';
+    
+    if (!name || name.toLowerCase() === 'untitled' || Object.values(extMap).some(ext => name.toLowerCase() === `untitled${ext}`)) {
       alert('Please enter a custom file name.');
       return;
     }
-    if (!name.endsWith('.py')) name += '.py';
+
+    if (!name.endsWith(currentExt)) {
+      const base = name.replace(/\.[a-zA-Z0-9]+$/, '');
+      name = base + currentExt;
+    }
 
     // Prevent duplicate filenames in history
     const nameExists = history.some(item => item.fileName && item.fileName.toLowerCase() === name.toLowerCase());
@@ -241,19 +538,61 @@ export default function Home() {
       return;
     }
 
-    // Only clear editor code and reset terminal if we are starting a subsequent new file
-    if (activeFileName) {
-      setCode(DEFAULT_CODE);
-      setConsoleLines([]);
-      setConsoleStatus('');
-      setConsoleTime(null);
-      setConsoleEngine('');
-      setActiveHistoryId(null);
+    const defaultCodeForLang = CODE_TEMPLATES[selectedLanguage] || CODE_TEMPLATES.python;
+    try {
+      const newEntry = await createHistoryItem(name, selectedLanguage, defaultCodeForLang);
+      if (newEntry) {
+        setHistory(prev => [newEntry, ...prev]);
+        isSwitchingFileRef.current = true;
+        setActiveHistoryId(newEntry.id);
+        setActiveFileName(name);
+        setCode(defaultCodeForLang);
+        setOpenTabs(prev => [...prev, newEntry.id]);
+        
+        // Clear console outputs
+        setConsoleLines([]);
+        setConsoleStatus('');
+        setConsoleTime(null);
+        setConsoleEngine('');
+      }
+    } catch (err) {
+      console.error('Failed to create named file entry:', err);
+      alert('Error creating file. Please try again.');
     }
 
-    setActiveFileName(name);
     setShowFileNameModal(false);
     setTempFileName('');
+  };
+
+  const handleLanguageChange = (newLang) => {
+    setSelectedLanguage(newLang);
+    const defaults = { cpp: 'c++20', c: 'c11', java: '17', python: '3' };
+    setCompilerVersion(defaults[newLang] || '3');
+    
+    // Update active file name extension accordingly
+    if (activeFileName) {
+      const lastDotIdx = activeFileName.lastIndexOf('.');
+      const base = lastDotIdx !== -1 ? activeFileName.substring(0, lastDotIdx) : activeFileName;
+      const ext = newLang === 'python' ? 'py' : newLang === 'java' ? 'java' : newLang === 'cpp' ? 'cpp' : 'c';
+      setActiveFileName(`${base}.${ext}`);
+    }
+    
+    const pyTemplate = CODE_TEMPLATES.python;
+    const cTemplate = CODE_TEMPLATES.c;
+    const cppTemplate = CODE_TEMPLATES.cpp;
+    const javaTemplate = CODE_TEMPLATES.java;
+
+    const trimmedCode = code.trim();
+    if (!trimmedCode || 
+        trimmedCode === pyTemplate.trim() || 
+        trimmedCode === cTemplate.trim() || 
+        trimmedCode === cppTemplate.trim() || 
+        trimmedCode === javaTemplate.trim() ||
+        trimmedCode === `# Welcome to the AI Python Code Runner\n# Write your Python code below\n# If any error occurs, click AI Quick Fix\n\nprint("Hello World")`.trim()
+    ) {
+      const nextTemplate = CODE_TEMPLATES[newLang] || CODE_TEMPLATES.python;
+      setCode(nextTemplate);
+    }
   };
 
   const handleNewFileClick = () => {
@@ -292,13 +631,15 @@ export default function Home() {
   };
 
   const handleSelectHistoryItem = (item) => {
+    isSwitchingFileRef.current = true;
     setActiveHistoryId(item.id);
     setCode(item.code);
     setExplanation('');
+    setSelectedLanguage(item.language || 'python');
     if (item.fileName) {
       setActiveFileName(item.fileName);
     } else {
-      setActiveFileName('untitled.py');
+      setActiveFileName(item.language === 'java' ? 'untitled.java' : item.language === 'cpp' ? 'untitled.cpp' : item.language === 'c' ? 'untitled.c' : 'untitled.py');
     }
     const historyLines = [];
     if (item.output) {
@@ -311,7 +652,15 @@ export default function Home() {
     setConsoleStatus(item.status || '');
     setConsoleTime(item.executionTime);
     setConsoleEngine(item.engine || '');
+    setConsoleMemory(item.memoryUsage || null);
+    setConsoleExitCode(item.exitCode !== undefined ? item.exitCode : null);
+    setTestCaseResults(null);
     setActiveHistoryId(item.id);
+    
+    // Add to open tabs if not present
+    if (!openTabs.includes(item.id)) {
+      setOpenTabs(prev => [...prev, item.id]);
+    }
   };
 
   const handleClearConsole = () => {
@@ -319,6 +668,8 @@ export default function Home() {
     setConsoleStatus('');
     setConsoleTime(null);
     setConsoleEngine('');
+    setConsoleMemory(null);
+    setConsoleExitCode(null);
   };
 
   const handleStdinSubmit = (inputValue) => {
@@ -356,6 +707,42 @@ export default function Home() {
         isLoading={isExecuting}
         theme={theme}
         explanation={explanation}
+        language={selectedLanguage}
+        fontSize={fontSize}
+        setFontSize={setFontSize}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+        openTabs={openTabs}
+        activeHistoryId={activeHistoryId}
+        onSelectTab={(id) => {
+          const item = history.find(h => h.id === id);
+          if (item) handleSelectHistoryItem(item);
+        }}
+        onCloseTab={(id) => {
+          const tabIndex = openTabs.indexOf(id);
+          const updatedTabs = openTabs.filter(tid => tid !== id);
+          setOpenTabs(updatedTabs);
+          
+          if (id === activeHistoryId) {
+            if (updatedTabs.length > 0) {
+              const nextActiveId = updatedTabs[Math.min(tabIndex, updatedTabs.length - 1)];
+              const nextItem = history.find(h => h.id === nextActiveId);
+              if (nextItem) handleSelectHistoryItem(nextItem);
+            } else {
+              setActiveHistoryId(null);
+              setActiveFileName('');
+              setCode('');
+              setConsoleLines([]);
+              setConsoleStatus('');
+              setConsoleTime(null);
+              setConsoleEngine('');
+              setConsoleMemory(null);
+              setConsoleExitCode(null);
+              setTestCaseResults(null);
+            }
+          }
+        }}
+        history={history}
       />
     );
 
@@ -370,6 +757,11 @@ export default function Home() {
         onQuickFix={handleQuickFix}
         isFixing={isFixing}
         onStdinSubmit={handleStdinSubmit}
+        memoryUsage={consoleMemory}
+        exitCode={consoleExitCode}
+        testCases={testCases}
+        testCaseResults={testCaseResults}
+        onRunTestCases={handleRunTestCases}
       />
     );
 
@@ -447,8 +839,84 @@ export default function Home() {
         <div className="sidebar-header" style={{ padding: '16px', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <div className="logo-container">
-              <Terminal className="logo-icon" size={24} />
-              <span className="logo-text">AI Python Runner</span>
+              <svg 
+                className="logo-icon animate-fade" 
+                width="24" 
+                height="24" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                xmlns="http://www.w3.org/2000/svg"
+                style={{ flexShrink: 0 }}
+              >
+                <defs>
+                  <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#38bdf8" />
+                    <stop offset="100%" stopColor="#a855f7" />
+                  </linearGradient>
+                </defs>
+                <polygon 
+                  points="12 2, 21 6.5, 21 17.5, 12 22, 3 17.5, 3 6.5" 
+                  stroke="url(#logo-grad)" 
+                  strokeWidth="2.2" 
+                  strokeLinejoin="round" 
+                  fill="none" 
+                />
+                <path 
+                  d="M8.5 9.5 L5.5 12 L8.5 14.5" 
+                  stroke="#38bdf8" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  fill="none" 
+                />
+                <path 
+                  d="M15.5 9.5 L18.5 12 L15.5 14.5" 
+                  stroke="#38bdf8" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  fill="none" 
+                />
+                <line 
+                  x1="13.5" 
+                  y1="8" 
+                  x2="10.5" 
+                  y2="16" 
+                  stroke="#38bdf8" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                />
+              </svg>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+                <div style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>Code</span>
+                  <span style={{
+                    background: 'linear-gradient(135deg, #38bdf8 0%, #a855f7 100%)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    fontWeight: 700
+                  }}>Orbit</span>
+                </div>
+                <div style={{
+                  fontSize: '0.52rem',
+                  color: 'var(--text-muted)',
+                  letterSpacing: '0.8px',
+                  fontWeight: 600,
+                  marginTop: '3px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                  textTransform: 'uppercase'
+                }}>
+                  <span>Write</span>
+                  <span style={{ color: '#38bdf8', fontSize: '0.6rem' }}>•</span>
+                  <span>Run</span>
+                  <span style={{ color: '#818cf8', fontSize: '0.6rem' }}>•</span>
+                  <span>Debug</span>
+                  <span style={{ color: '#a855f7', fontSize: '0.6rem' }}>•</span>
+                  <span>Innovate</span>
+                </div>
+              </div>
             </div>
 
             <button 
@@ -508,6 +976,74 @@ export default function Home() {
             <span>New File</span>
           </button>
 
+          {/* Workspace ZIP utilities */}
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            marginBottom: '16px',
+            borderBottom: '1px solid var(--border-color)',
+            paddingBottom: '12px'
+          }}>
+            <label
+              htmlFor="import-zip-input"
+              className="action-btn"
+              style={{
+                flex: 1,
+                fontSize: '0.75rem',
+                padding: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '4px',
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px'
+              }}
+              title="Import Workspace (.zip)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent-color)' }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <span>Import ZIP</span>
+            </label>
+            <input
+              type="file"
+              id="import-zip-input"
+              accept=".zip"
+              onChange={handleImportWorkspace}
+              style={{ display: 'none' }}
+            />
+
+            <button
+              onClick={handleExportWorkspace}
+              className="action-btn"
+              style={{
+                flex: 1,
+                fontSize: '0.75rem',
+                padding: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '4px',
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+              title="Export Workspace (.zip)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent-color)' }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <span>Export ZIP</span>
+            </button>
+          </div>
+
           <div className="history-title">
             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Database size={12} />
@@ -559,13 +1095,36 @@ export default function Home() {
                     </div>
                   </div>
                   
-                  <button
-                    onClick={(e) => handleDeleteHistoryItem(e, item.id)}
-                    className="history-delete-btn"
-                    title="Remove item"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'center' }}>
+                    <button
+                      onClick={(e) => handleRenameClick(e, item.id, item.fileName)}
+                      className="history-rename-btn"
+                      title="Rename file"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--text-muted)',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '4px',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent-color)'}
+                      onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                    <button
+                      onClick={(e) => handleDeleteHistoryItem(e, item.id)}
+                      className="history-delete-btn"
+                      title="Remove item"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -587,58 +1146,286 @@ export default function Home() {
           position: 'relative'
         }}>
           <div className="workspace-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '0.9rem' }}>
-            {!sidebarOpen && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="icon-btn-leetcode"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--text-secondary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  marginRight: '4px'
-                }}
-                title="Open Sidebar"
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="sidebar-toggle-logo-btn"
+              title={sidebarOpen ? "Close Sidebar" : "Open Sidebar"}
+            >
+              {/* SVG 1: CodeOrbit Logo Icon (Visible by default) */}
+              <svg 
+                className="logo-icon-svg" 
+                width="20" 
+                height="20" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                xmlns="http://www.w3.org/2000/svg"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                  <line x1="9" y1="3" x2="9" y2="21"/>
-                  <path d="M15 9l3 3-3 3"/>
-                </svg>
-              </button>
-            )}
-            <Terminal size={15} style={{ color: 'var(--accent-color)' }} />
+                <defs>
+                  <linearGradient id="logo-grad-toggle" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#38bdf8" />
+                    <stop offset="100%" stopColor="#a855f7" />
+                  </linearGradient>
+                </defs>
+                <polygon 
+                  points="12 2, 21 6.5, 21 17.5, 12 22, 3 17.5, 3 6.5" 
+                  stroke="url(#logo-grad-toggle)" 
+                  strokeWidth="2.5" 
+                  strokeLinejoin="round" 
+                  fill="none" 
+                />
+                <path 
+                  d="M8.5 9.5 L5.5 12 L8.5 14.5" 
+                  stroke="#38bdf8" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  fill="none" 
+                />
+                <path 
+                  d="M15.5 9.5 L18.5 12 L15.5 14.5" 
+                  stroke="#38bdf8" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  fill="none" 
+                />
+                <line 
+                  x1="13.5" 
+                  y1="8" 
+                  x2="10.5" 
+                  y2="16" 
+                  stroke="#38bdf8" 
+                  strokeWidth="2" 
+                  strokeLinecap="round" 
+                />
+              </svg>
+
+              {/* SVG 2: Sidebar Toggle Icon (Visible on hover) */}
+              <svg 
+                className="menu-icon-svg" 
+                width="18" 
+                height="18" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2.5" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="9" y1="3" x2="9" y2="21"/>
+                <path d={sidebarOpen ? "M15 15l-3-3 3-3" : "M15 9l3 3-3 3"} />
+              </svg>
+            </button>
+            <Terminal size={15} style={{ color: 'var(--accent-color)', marginLeft: '4px' }} />
             <span>Interactive Editor</span>
           </div>
 
-          {/* Centered Active File Name Badge */}
+          {/* Centered Active File Name & Language Selection Badge */}
           {activeFileName && (
-            <div className="active-file-badge animate-fade" style={{
+            <div style={{
               position: 'absolute',
               left: '50%',
               transform: 'translateX(-50%)',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '4px 12px',
-              background: 'var(--bg-primary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '20px',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              color: 'var(--accent-color)',
-              fontFamily: 'var(--font-mono)'
+              gap: '8px',
+              zIndex: 10
             }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
-                <polyline points="14 2 14 8 20 8"/>
-              </svg>
-              <span>{activeFileName}</span>
+              {/* Box 1: File Name */}
+              <div className="active-file-badge animate-fade" style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                color: 'var(--text-primary)',
+                fontFamily: 'var(--font-mono)',
+                height: '32px',
+                boxSizing: 'border-box'
+              }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent-color)' }}>
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <span>{activeFileName}</span>
+              </div>
+
+              {/* Box 2: Language Selector */}
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setShowLangDropdown(!showLangDropdown)}
+                  className="action-btn animate-fade"
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    color: 'var(--accent-color)',
+                    borderColor: 'var(--border-color)',
+                    background: 'var(--bg-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 14px',
+                    height: '32px',
+                    boxSizing: 'border-box'
+                  }}
+                  title="Select Programming Language"
+                >
+                  <span>{selectedLanguage === 'python' ? 'Python' : selectedLanguage === 'java' ? 'Java' : selectedLanguage === 'cpp' ? 'C++' : 'C'}</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transition: 'transform 0.2s', transform: showLangDropdown ? 'rotate(180deg)' : 'none' }}>
+                    <path d="m6 9 6 6 6-6"/>
+                  </svg>
+                </button>
+                
+                {showLangDropdown && (
+                  <div className="glass-panel animate-fade" style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 6px)',
+                    right: 0,
+                    width: '120px',
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    boxShadow: 'var(--shadow-main)',
+                    padding: '4px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '2px',
+                    zIndex: 200
+                  }}>
+                    {[
+                      { value: 'python', label: 'Python' },
+                      { value: 'c', label: 'C' },
+                      { value: 'cpp', label: 'C++' },
+                      { value: 'java', label: 'Java' }
+                    ].map((lang) => (
+                      <button
+                        key={lang.value}
+                        onClick={() => {
+                          handleLanguageChange(lang.value);
+                          setShowLangDropdown(false);
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px 12px',
+                          background: selectedLanguage === lang.value ? 'rgba(var(--accent-color-rgb), 0.1)' : 'transparent',
+                          color: selectedLanguage === lang.value ? 'var(--accent-color)' : 'var(--text-primary)',
+                          border: 'none',
+                          borderRadius: '4px',
+                          fontSize: '0.8rem',
+                          fontWeight: selectedLanguage === lang.value ? 600 : 400,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {lang.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Box 2.5: Compiler Version Selector */}
+              {(selectedLanguage === 'cpp' || selectedLanguage === 'c' || selectedLanguage === 'java') && (
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => setShowVersionDropdown(!showVersionDropdown)}
+                    className="action-btn animate-fade"
+                    style={{
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      color: 'var(--accent-color)',
+                      borderColor: 'var(--border-color)',
+                      background: 'var(--bg-primary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 14px',
+                      height: '32px',
+                      boxSizing: 'border-box'
+                    }}
+                    title="Select Compiler Version / Standard"
+                  >
+                    <span>{getCompilerVersionLabel()}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', transition: 'transform 0.2s', transform: showVersionDropdown ? 'rotate(180deg)' : 'none' }}>
+                      <path d="m6 9 6 6 6-6"/>
+                    </svg>
+                  </button>
+                  
+                  {showVersionDropdown && (
+                    <div className="glass-panel animate-fade" style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      right: 0,
+                      width: '150px',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      boxShadow: 'var(--shadow-main)',
+                      padding: '4px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px',
+                      zIndex: 200
+                    }}>
+                      {getAvailableVersions(selectedLanguage).map((ver) => (
+                        <button
+                          key={ver.value}
+                          onClick={() => {
+                            setCompilerVersion(ver.value);
+                            setShowVersionDropdown(false);
+                          }}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '8px 12px',
+                            background: compilerVersion === ver.value ? 'rgba(var(--accent-color-rgb), 0.1)' : 'transparent',
+                            color: compilerVersion === ver.value ? 'var(--accent-color)' : 'var(--text-primary)',
+                            border: 'none',
+                            borderRadius: '4px',
+                            fontSize: '0.8rem',
+                            fontWeight: compilerVersion === ver.value ? 600 : 400,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          {ver.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Box 3: Auto Save Status Indicator */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '4px 8px',
+                borderRadius: '4px',
+                fontSize: '0.65rem',
+                fontWeight: 600,
+                background: autoSaveStatus === 'Saving...' ? 'rgba(234, 179, 8, 0.1)' : autoSaveStatus === 'Error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                color: autoSaveStatus === 'Saving...' ? 'var(--warning-color, #eab308)' : autoSaveStatus === 'Error' ? 'var(--error-color, #ef4444)' : 'var(--success-color, #22c55e)',
+                border: autoSaveStatus === 'Saving...' ? '1px solid rgba(234, 179, 8, 0.2)' : autoSaveStatus === 'Error' ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(34, 197, 94, 0.2)',
+                height: '20px',
+                boxSizing: 'border-box'
+              }}>
+                <span style={{
+                  width: '5px',
+                  height: '5px',
+                  borderRadius: '50%',
+                  background: 'currentColor',
+                  display: 'inline-block'
+                }} />
+                <span>{autoSaveStatus}</span>
+              </div>
             </div>
           )}
 
@@ -953,7 +1740,7 @@ export default function Home() {
                   <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
                   <polyline points="14 2 14 8 20 8"/>
                 </svg>
-                <span>Create Python File</span>
+                <span>Create New File</span>
               </div>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -962,7 +1749,7 @@ export default function Home() {
                   type="text"
                   value={tempFileName}
                   onChange={(e) => setTempFileName(e.target.value)}
-                  placeholder="e.g. main.py"
+                  placeholder="e.g. main"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
@@ -997,6 +1784,93 @@ export default function Home() {
                   }}
                 >
                   Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Rename File Modal */}
+        {showRenameModal && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.6)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div className="glass-panel animate-fade" style={{
+              width: '320px',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              padding: '20px',
+              boxShadow: 'var(--shadow-main)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.95rem', marginBottom: '16px' }}>
+                <Edit2 size={16} style={{ color: 'var(--accent-color)' }} />
+                <span>Rename File</span>
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>New Name</label>
+                <input
+                  type="text"
+                  value={renameItemName}
+                  onChange={(e) => setRenameItemName(e.target.value)}
+                  placeholder="e.g. main"
+                  style={{
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    padding: '8px 12px',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.85rem',
+                    outline: 'none'
+                  }}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveRename();
+                    if (e.key === 'Escape') setShowRenameModal(false);
+                  }}
+                />
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  onClick={() => setShowRenameModal(false)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-secondary)',
+                    borderRadius: '6px',
+                    padding: '6px 12px',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveRename}
+                  style={{
+                    background: 'var(--accent-color)',
+                    border: 'none',
+                    color: '#ffffff',
+                    borderRadius: '6px',
+                    padding: '6px 12px',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Rename
                 </button>
               </div>
             </div>
